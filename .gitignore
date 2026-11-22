@@ -30,3 +30,5 @@ Thumbs.db
 
 # Dataset files - never push raw data to GitHub
 data/
+artifacts/
+reports/
