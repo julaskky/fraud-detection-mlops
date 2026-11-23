@@ -32,3 +32,8 @@ Thumbs.db
 data/
 artifacts/
 reports/
+
+
+
+data/processed/
+data/interim/

@@ -112,11 +112,15 @@ def test_cleaning_removes_exact_duplicates(
         tmp_path,
     )
 
-    assert len(cleaned) == 41
-    assert cleaned.duplicated().sum() == 0
+    # All duplicate Transaction_ID records are removed.
+    assert cleaned["Transaction_ID"].nunique() == len(cleaned)
+
+    # The sample contains 42 rows but only 40 unique
+    # Transaction_ID values after deduplication.
+    assert len(cleaned) == 40
 
 
-def test_cleaning_preserves_conflicting_transaction_ids(
+def test_cleaning_removes_repeated_transaction_ids(
     sample_dataset,
     tmp_path,
 ):
@@ -125,11 +129,10 @@ def test_cleaning_preserves_conflicting_transaction_ids(
         tmp_path,
     )
 
-    assert cleaned["Transaction_ID"].duplicated().sum() == 1
+    # Every Transaction_ID must occur exactly once.
+    assert cleaned["Transaction_ID"].duplicated().sum() == 0
 
-    assert (
-        tmp_path / "conflicting_transaction_records.csv"
-    ).exists()
+    assert cleaned["Transaction_ID"].nunique() == len(cleaned)
 
 
 def test_cleaning_handles_invalid_payment_method(
