@@ -1,0 +1,202 @@
+
+import json
+from pathlib import Path
+
+import joblib
+import mlflow
+import mlflow.sklearn
+import pandas as pd
+from mlflow.models import infer_signature
+
+
+# ============================================================
+# PATHS AND CONFIGURATION
+# ============================================================
+
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
+
+MODEL_PATH = (
+    PROJECT_ROOT
+    / "artifacts"
+    / "paysim"
+    / "models"
+    / "random_forest_paysim.joblib"
+)
+
+RESULTS_PATH = (
+    PROJECT_ROOT
+    / "artifacts"
+    / "paysim"
+    / "results"
+)
+
+RESULTS_JSON = RESULTS_PATH / "random_forest_results.json"
+FEATURE_IMPORTANCE_PATH = (
+    RESULTS_PATH / "random_forest_feature_importance.csv"
+)
+
+MLFLOW_DB = PROJECT_ROOT / "artifacts" / "mlflow.db"
+TRACKING_URI = f"sqlite:///{MLFLOW_DB.as_posix()}"
+
+EXPERIMENT_NAME = "PaySim Random Forest"
+REGISTERED_MODEL_NAME = "PaySim_Random_Forest"
+
+
+# ============================================================
+# MLFLOW CONFIGURATION
+# ============================================================
+
+mlflow.set_tracking_uri(TRACKING_URI)
+mlflow.set_registry_uri(TRACKING_URI)
+
+mlflow.set_experiment(EXPERIMENT_NAME)
+
+
+# ============================================================
+# LOAD MODEL BUNDLE AND RESULTS
+# ============================================================
+
+print("=" * 70)
+print("PAYSIM RANDOM FOREST - MLFLOW INTEGRATION")
+print("=" * 70)
+
+if not MODEL_PATH.exists():
+    raise FileNotFoundError(f"Model not found: {MODEL_PATH}")
+
+if not RESULTS_JSON.exists():
+    raise FileNotFoundError(f"Results file not found: {RESULTS_JSON}")
+
+bundle = joblib.load(MODEL_PATH)
+
+if not isinstance(bundle, dict):
+    raise TypeError("Expected the saved model artifact to be a dictionary.")
+
+required_keys = {"model", "threshold", "feature_names"}
+
+if not required_keys.issubset(bundle.keys()):
+    raise KeyError(
+        f"Model bundle must contain: {sorted(required_keys)}"
+    )
+
+model = bundle["model"]
+threshold = float(bundle["threshold"])
+feature_names = bundle["feature_names"]
+
+if not hasattr(model, "predict_proba"):
+    raise TypeError("The loaded Random Forest does not support predict_proba.")
+
+with open(RESULTS_JSON, "r", encoding="utf-8") as file:
+    results = json.load(file)
+
+print(f"Model loaded: {MODEL_PATH.name}")
+print(f"Model type: {type(model).__name__}")
+print(f"Decision threshold: {threshold}")
+print(f"Number of features: {len(feature_names)}")
+
+
+# ============================================================
+# PREPARE MODEL SIGNATURE
+# ============================================================
+
+input_example = pd.DataFrame(
+    [[0.0] * len(feature_names)],
+    columns=feature_names,
+)
+
+prediction_example = model.predict_proba(input_example)[:, 1]
+
+signature = infer_signature(
+    input_example,
+    prediction_example,
+)
+
+
+# ============================================================
+# LOG PARAMETERS, METRICS, ARTIFACTS AND MODEL
+# ============================================================
+
+print("\nStarting MLflow run...")
+
+with mlflow.start_run(
+    run_name="Random Forest - PaySim - Chronological Split"
+) as run:
+
+    # Model parameters
+    model_parameters = results.get("model_parameters", {})
+
+    mlflow.log_params({
+        "dataset": results.get("dataset", "PaySim"),
+        "model": results.get("model", "RandomForestClassifier"),
+        "split_strategy": results.get("split_strategy", "chronological"),
+        "random_state": results.get("random_state", 42),
+        "train_max_step": results.get("train_max_step", 520),
+        "validation_max_step": results.get("validation_max_step", 632),
+        "decision_threshold": threshold,
+        **model_parameters,
+    })
+
+    # Validation and test metrics
+    for split_name in ("validation_metrics", "test_metrics"):
+        metrics = results.get(split_name, {})
+
+        for metric_name, metric_value in metrics.items():
+            if isinstance(metric_value, (int, float)):
+                mlflow.log_metric(
+                    f"{split_name}_{metric_name}",
+                    float(metric_value),
+                )
+
+    # Additional model information
+    mlflow.log_dict(
+        {
+            "threshold": threshold,
+            "feature_names": feature_names,
+            "model_name": REGISTERED_MODEL_NAME,
+            "dataset": results.get("dataset", "PaySim"),
+        },
+        "deployment_config.json",
+    )
+
+    # Log original complete bundle for deployment reference
+    mlflow.log_artifact(
+        str(MODEL_PATH),
+        artifact_path="deployment_bundle",
+    )
+
+    # Log original evaluation results
+    mlflow.log_artifact(
+        str(RESULTS_JSON),
+        artifact_path="evaluation",
+    )
+
+    if FEATURE_IMPORTANCE_PATH.exists():
+        mlflow.log_artifact(
+            str(FEATURE_IMPORTANCE_PATH),
+            artifact_path="evaluation",
+        )
+
+    # Register the actual Random Forest estimator.
+    # The Tree type is explicitly trusted because this model
+    # was generated by our own training process.
+    mlflow.sklearn.log_model(
+        sk_model=model,
+        name="random_forest_model",
+        registered_model_name=REGISTERED_MODEL_NAME,
+        signature=signature,
+        input_example=input_example,
+        skops_trusted_types=[
+            "sklearn.tree._tree.Tree"
+        ],
+    )
+
+    print("\nMLflow run completed.")
+    print(f"Run ID: {run.info.run_id}")
+    print(f"Experiment ID: {run.info.experiment_id}")
+
+
+print("\n" + "=" * 70)
+print("RANDOM FOREST MLFLOW TRACKING COMPLETED")
+print("=" * 70)
+print(f"Experiment: {EXPERIMENT_NAME}")
+print(f"Registered model: {REGISTERED_MODEL_NAME}")
+print(f"Tracking database: {MLFLOW_DB}")

@@ -1,9 +1,10 @@
+
 # Python
 __pycache__/
 *.py[cod]
 *.pyo
 
-# Virtual environment
+# Virtual environments
 .venv/
 venv/
 env/
@@ -19,6 +20,7 @@ mlruns/
 
 # Environment variables
 .env
+.env.*
 
 # IDE
 .vscode/
@@ -28,12 +30,13 @@ mlruns/
 .DS_Store
 Thumbs.db
 
-# Dataset files - never push raw data to GitHub
+# Logs and databases
+*.log
+*.db
+
+# Datasets - never push raw or processed data
 data/
+
+# Model artifacts, MLflow database and generated reports
 artifacts/
 reports/
-
-
-
-data/processed/
-data/interim/
